@@ -1,0 +1,35 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+# Raw and processed source data are large and/or account-bound.
+data/raw/
+data/processed/
+
+# Local training artifacts.
+catboost_info/
+models/
+*.pid
+*.log
+
+# Keep lightweight prediction/result artifacts, figures, configs, and scripts.
+!data/
+!data/predictions/
+!data/predictions/*.csv
+data/predictions/metric_smoke_*
+data/predictions/oof_stacking_smoke_*
+data/predictions/tabular_model_*
+data/predictions/lstm_full_*
+data/predictions/era5_ablation_with_era5_test_predictions_2023.csv
+data/predictions/era5_ablation_without_era5_test_predictions_2023.csv
+
+reports/modeling/metric_smoke_*
+reports/modeling/oof_stacking_smoke_*
+reports/modeling/tabular_model_*
+reports/modeling/lstm_full_*
+reports/modeling/era5_ablation_with_era5_results.csv
+reports/modeling/era5_ablation_with_era5_run_metadata.json
+reports/modeling/era5_ablation_without_era5_results.csv
+reports/modeling/era5_ablation_without_era5_run_metadata.json
+reports/modeling/era5_ablation_summary.csv
+reports/modeling/era5_ablation_summary.md

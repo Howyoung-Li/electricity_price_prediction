@@ -1,0 +1,310 @@
+{
+  "project": {
+    "name": "de_lu_day_ahead_price_forecasting",
+    "target": "day_ahead_price",
+    "timestamp_col": "timestamp_utc",
+    "timezone": "UTC",
+    "frequency": "1h",
+    "task": "regression"
+  },
+  "data": {
+    "model_table": "data/processed/de_lu_hourly_2019_2023.csv",
+    "era5_features": "data/processed/era5/era5_de_lu_hourly_region_features_2019_2023.csv",
+    "train": {
+      "start": "2019-01-01T00:00:00Z",
+      "end": "2021-12-31T23:00:00Z"
+    },
+    "validation": {
+      "start": "2022-01-01T00:00:00Z",
+      "end": "2022-12-31T23:00:00Z"
+    },
+    "test": {
+      "start": "2023-01-01T00:00:00Z",
+      "end": "2023-12-31T23:00:00Z"
+    }
+  },
+  "feature_sets": {
+    "A_price_calendar": {
+      "description": "Historical price lags, rolling price statistics, and calendar features.",
+      "include_groups": ["calendar", "price_lags", "price_rollings"]
+    },
+    "B_power_fundamental": {
+      "description": "A plus electricity fundamentals such as load and wind/solar forecasts.",
+      "include_groups": ["calendar", "price_lags", "price_rollings", "smard_forecasts", "smard_fundamental_derived"]
+    },
+    "C_power_era5": {
+      "description": "B plus ERA5 weather features.",
+      "include_groups": ["calendar", "price_lags", "price_rollings", "smard_forecasts", "smard_fundamental_derived", "era5"]
+    },
+    "D_power_pvgis": {
+      "description": "B plus PVGIS-SARAH3 satellite radiation features.",
+      "include_groups": ["calendar", "price_lags", "price_rollings", "smard_forecasts", "smard_fundamental_derived", "pvgis_sarah3"]
+    },
+    "E_full": {
+      "description": "B plus ERA5 and PVGIS-SARAH3.",
+      "include_groups": ["calendar", "price_lags", "price_rollings", "smard_forecasts", "smard_fundamental_derived", "era5", "pvgis_sarah3"]
+    }
+  },
+  "validation_strategy": {
+    "type": "expanding_window_time_series_cv",
+    "n_splits": 4,
+    "gap_hours": 24,
+    "min_train_months": 18,
+    "validation_months": 6,
+    "final_validation_period": "2022",
+    "final_test_period": "2023",
+    "shuffle": false
+  },
+  "metrics": {
+    "primary": "mae",
+    "secondary": [
+      "rmse",
+      "smape",
+      "r2",
+      "direction_accuracy_prev_hour",
+      "direction_accuracy_lag24",
+      "negative_price_precision",
+      "negative_price_recall",
+      "top10_price_mae"
+    ],
+    "business_slices": [
+      "top_10_percent_price_mae",
+      "negative_price_precision_recall",
+      "solar_midday_10_15_mae",
+      "evening_ramp_17_21_mae",
+      "winter_mae",
+      "summer_mae"
+    ]
+  },
+  "preprocessing": {
+    "missing_values": {
+      "numeric_strategy": "median_fit_on_train_only",
+      "max_missing_fraction_drop_feature": 0.2
+    },
+    "scaling": {
+      "standard_scaler": {
+        "fit_on_train_only": true,
+        "applies_to_models": ["elastic_net", "lstm", "rnn"]
+      },
+      "none": {
+        "applies_to_models": ["xgboost", "lightgbm", "catboost", "gbm_stacking"]
+      }
+    },
+    "target_transform": {
+      "enabled": false,
+      "candidates_for_tuning": ["none", "standardize_target_for_neural_nets"]
+    }
+  },
+  "hyperparameter_tuning": {
+    "enabled": true,
+    "search_backend": "randomized_search_initially_optuna_optional",
+    "selection_metric": "mae",
+    "max_trials_per_model": 10,
+    "early_stop_if_no_improvement_trials": 20,
+    "random_seed": 42,
+    "refit_on_train_plus_validation_before_test": true,
+    "notes": "Do not use a single fixed hyperparameter set. All non-baseline models must be tuned within the spaces below using time-series CV."
+  },
+  "models": {
+    "naive_lag_24h": {
+      "type": "baseline",
+      "enabled": true,
+      "requires_scaling": false,
+      "tune": false,
+      "prediction": "price_lag_24h"
+    },
+    "seasonal_naive_lag_168h": {
+      "type": "baseline",
+      "enabled": true,
+      "requires_scaling": false,
+      "tune": false,
+      "prediction": "price_lag_168h"
+    },
+    "elastic_net": {
+      "type": "linear",
+      "library": "sklearn.linear_model.ElasticNet",
+      "enabled": true,
+      "requires_scaling": true,
+      "tune": true,
+      "search_space": {
+        "alpha": {"type": "loguniform", "low": 0.000001, "high": 10.0},
+        "l1_ratio": {"type": "uniform", "low": 0.0, "high": 1.0},
+        "max_iter": {"type": "choice", "values": [5000, 10000, 20000]}
+      }
+    },
+    "xgboost": {
+      "type": "gbm",
+      "library": "xgboost.XGBRegressor",
+      "enabled": true,
+      "requires_scaling": false,
+      "tune": true,
+      "search_space": {
+        "n_estimators": {"type": "int", "low": 300, "high": 3000},
+        "learning_rate": {"type": "loguniform", "low": 0.005, "high": 0.2},
+        "max_depth": {"type": "int", "low": 2, "high": 10},
+        "min_child_weight": {"type": "loguniform", "low": 0.1, "high": 100.0},
+        "subsample": {"type": "uniform", "low": 0.5, "high": 1.0},
+        "colsample_bytree": {"type": "uniform", "low": 0.5, "high": 1.0},
+        "reg_alpha": {"type": "loguniform", "low": 0.000001, "high": 10.0},
+        "reg_lambda": {"type": "loguniform", "low": 0.000001, "high": 100.0}
+      },
+      "fit_params": {
+        "objective": "reg:squarederror",
+        "tree_method": "hist",
+        "early_stopping_rounds": 100
+      }
+    },
+    "lightgbm": {
+      "type": "gbm",
+      "library": "lightgbm.LGBMRegressor",
+      "enabled": true,
+      "requires_scaling": false,
+      "tune": true,
+      "search_space": {
+        "n_estimators": {"type": "int", "low": 300, "high": 4000},
+        "learning_rate": {"type": "loguniform", "low": 0.003, "high": 0.2},
+        "num_leaves": {"type": "int", "low": 15, "high": 512},
+        "max_depth": {"type": "choice", "values": [-1, 3, 5, 7, 9, 12, 16]},
+        "min_child_samples": {"type": "int", "low": 10, "high": 300},
+        "subsample": {"type": "uniform", "low": 0.5, "high": 1.0},
+        "colsample_bytree": {"type": "uniform", "low": 0.5, "high": 1.0},
+        "reg_alpha": {"type": "loguniform", "low": 0.000001, "high": 10.0},
+        "reg_lambda": {"type": "loguniform", "low": 0.000001, "high": 100.0}
+      },
+      "fit_params": {
+        "objective": "regression_l1_or_regression",
+        "early_stopping_rounds": 100
+      }
+    },
+    "catboost": {
+      "type": "gbm",
+      "library": "catboost.CatBoostRegressor",
+      "enabled": true,
+      "requires_scaling": false,
+      "tune": true,
+      "search_space": {
+        "iterations": {"type": "int", "low": 300, "high": 3000},
+        "learning_rate": {"type": "loguniform", "low": 0.005, "high": 0.2},
+        "depth": {"type": "int", "low": 3, "high": 10},
+        "l2_leaf_reg": {"type": "loguniform", "low": 0.1, "high": 100.0},
+        "random_strength": {"type": "loguniform", "low": 0.000001, "high": 10.0},
+        "bagging_temperature": {"type": "uniform", "low": 0.0, "high": 10.0}
+      },
+      "fit_params": {
+        "loss_function": "MAE_or_RMSE",
+        "early_stopping_rounds": 100,
+        "allow_writing_files": false
+      }
+    },
+    "lstm": {
+      "type": "deep_sequence",
+      "library": "torch.nn.LSTM",
+      "enabled": true,
+      "requires_scaling": true,
+      "tune": true,
+      "sequence_features": "E_full",
+      "search_space": {
+        "lookback_hours": {"type": "choice", "values": [24, 48, 72, 168, 336]},
+        "hidden_size": {"type": "choice", "values": [32, 64, 128, 256]},
+        "num_layers": {"type": "choice", "values": [1, 2, 3]},
+        "dropout": {"type": "uniform", "low": 0.0, "high": 0.5},
+        "learning_rate": {"type": "loguniform", "low": 0.0001, "high": 0.01},
+        "batch_size": {"type": "choice", "values": [32, 64, 128, 256]},
+        "weight_decay": {"type": "loguniform", "low": 0.0000001, "high": 0.01}
+      },
+      "training": {
+        "max_epochs": 100,
+        "early_stopping_patience": 12,
+        "device_preference": ["mps", "cpu"]
+      }
+    },
+    "rnn": {
+      "type": "deep_sequence",
+      "library": "torch.nn.RNN",
+      "enabled": true,
+      "requires_scaling": true,
+      "tune": true,
+      "sequence_features": "E_full",
+      "search_space": {
+        "lookback_hours": {"type": "choice", "values": [24, 48, 72, 168]},
+        "hidden_size": {"type": "choice", "values": [16, 32, 64, 128]},
+        "num_layers": {"type": "choice", "values": [1, 2]},
+        "nonlinearity": {"type": "choice", "values": ["tanh", "relu"]},
+        "dropout": {"type": "uniform", "low": 0.0, "high": 0.4},
+        "learning_rate": {"type": "loguniform", "low": 0.0001, "high": 0.01},
+        "batch_size": {"type": "choice", "values": [32, 64, 128, 256]},
+        "weight_decay": {"type": "loguniform", "low": 0.0000001, "high": 0.01}
+      },
+      "training": {
+        "max_epochs": 100,
+        "early_stopping_patience": 12,
+        "device_preference": ["mps", "cpu"]
+      }
+    }
+  },
+  "stacking": {
+    "enabled": true,
+    "base_model_candidates": [
+      "elastic_net",
+      "xgboost",
+      "lightgbm",
+      "catboost",
+      "lstm",
+      "rnn"
+    ],
+    "oof_generation": {
+      "method": "time_series_out_of_fold_predictions",
+      "use_same_cv_as_base_tuning": true,
+      "gap_hours": 24,
+      "fit_base_models_with_best_tuned_params": true
+    },
+    "stacker_gbm": {
+      "description": "GBM meta-learner combining out-of-fold predictions from tuned base models.",
+      "enabled": true,
+      "meta_model": "lightgbm",
+      "requires_scaling": false,
+      "tune": true,
+      "search_space": {
+        "n_estimators": {"type": "int", "low": 100, "high": 1500},
+        "learning_rate": {"type": "loguniform", "low": 0.003, "high": 0.1},
+        "num_leaves": {"type": "int", "low": 3, "high": 63},
+        "max_depth": {"type": "choice", "values": [1, 2, 3, 4, 5, -1]},
+        "min_child_samples": {"type": "int", "low": 5, "high": 200},
+        "reg_alpha": {"type": "loguniform", "low": 0.000001, "high": 10.0},
+        "reg_lambda": {"type": "loguniform", "low": 0.000001, "high": 100.0}
+      },
+      "meta_features": {
+        "base_predictions": true,
+        "optional_original_features": false,
+        "optional_context_features": ["hour", "month", "load_forecast", "renewable_share_forecast"]
+      }
+    },
+    "stacker_non_negative_weights": {
+      "description": "Linear ensemble using non-negative weights on OOF predictions. Weights are not constrained to sum to one.",
+      "enabled": true,
+      "solver": "scipy.optimize.nnls_or_sklearn_positive_linear_regression",
+      "requires_scaling": false,
+      "constraints": {
+        "weights_non_negative": true,
+        "sum_to_one": false,
+        "fit_intercept": true
+      },
+      "tune": true,
+      "search_space": {
+        "use_intercept": {"type": "choice", "values": [true, false]},
+        "l2_regularization": {"type": "loguniform", "low": 0.0000001, "high": 10.0},
+        "base_model_subset_size": {"type": "int", "low": 3, "high": 9}
+      },
+      "selection": {
+        "subset_selection_metric": "validation_mae",
+        "allow_zero_weight_models": true
+      }
+    }
+  },
+  "outputs": {
+    "model_artifacts_dir": "models/",
+    "reports_dir": "reports/modeling/",
+    "prediction_dir": "data/predictions/",
+    "experiment_tracking_file": "reports/modeling/experiment_results.csv"
+  }
+}
