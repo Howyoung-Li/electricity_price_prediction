@@ -1,4 +1,4 @@
-# electricity_price_prediction
+# 小时级电力价格预测项目
 
 德国/Luxembourg bidding zone 日前电价小时级预测项目。项目目标是跑通一个完整的电价预测流程，并客观评估 ERA5 气象再分析数据对电价预测的边际贡献。
 
